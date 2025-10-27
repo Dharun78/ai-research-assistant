@@ -2,19 +2,27 @@ import { Paper } from '../types';
 import { GoogleGenAI, Type } from "@google/genai";
 
 const getAi = (): GoogleGenAI => {
-    // Check if the 'process' object and 'process.env' are available.
-    if (typeof process === 'undefined' || !process.env) {
+    let apiKey: string | undefined;
+    try {
+        // This is the prescribed way to access the key.
+        // It might be replaced by a build tool, or the environment might shim `process`.
+        apiKey = process.env.API_KEY;
+    } catch (e) {
+        // This catch block will handle the "ReferenceError: process is not defined" case gracefully.
+        console.error("Could not access process.env.API_KEY", e);
+    }
+
+    if (!apiKey) {
+        // This will be triggered if process.env.API_KEY is undefined, null, or an empty string,
+        // or if the try block failed.
         throw new Error(
-            "Configuration Error: The application is in an environment where `process.env` is not available. " +
-            "If deploying to a static host like Vercel, ensure your project is configured with a build step (e.g., using Vite or Next.js) " +
-            "to properly expose environment variables to the client-side."
+            "Configuration Error: The API_KEY is not available. \n\n" +
+            "If you have deployed this application, please ensure that the API_KEY environment variable is correctly set in your hosting provider's settings (e.g., Vercel, Netlify). \n\n" +
+            "The application cannot function without the API key."
         );
     }
-    
-    if (!process.env.API_KEY) {
-        throw new Error("Configuration Error: The API_KEY environment variable is not set. Please add your API_KEY to your project's environment variables in your hosting platform (e.g., Vercel).");
-    }
-    return new GoogleGenAI({ apiKey: process.env.API_KEY });
+
+    return new GoogleGenAI({ apiKey });
 }
 
 // Stage 1: Gather raw, unstructured data using Google Search.
