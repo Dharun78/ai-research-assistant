@@ -1,44 +1,45 @@
 import { Paper } from '../types';
 import { GoogleGenAI, Type } from "@google/genai";
 
-const getAi = (): GoogleGenAI => {
-    let apiKey: string | undefined;
-    try {
-        // This is the prescribed way to access the key.
-        // It might be replaced by a build tool, or the environment might shim `process`.
-        apiKey = process.env.API_KEY;
-    } catch (e) {
-        // This catch block will handle the "ReferenceError: process is not defined" case gracefully.
-        console.error("Could not access process.env.API_KEY", e);
-    }
+// This is the standard way to access environment variables in a Vite project.
+// Vercel will automatically expose variables with the VITE_ prefix to the client during the build process.
+const API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
 
-    if (!apiKey) {
-        // This will be triggered if process.env.API_KEY is undefined, null, or an empty string,
-        // or if the try block failed.
-        throw new Error(
-            "Configuration Error: The API_KEY is not available. \n\n" +
-            "If you have deployed this application, please ensure that the API_KEY environment variable is correctly set in your hosting provider's settings (e.g., Vercel, Netlify). \n\n" +
-            "The application cannot function without the API key."
-        );
-    }
-
-    return new GoogleGenAI({ apiKey });
+if (!API_KEY) {
+    throw new Error(
+        "Configuration Error: VITE_GEMINI_API_KEY is not set. " +
+        "Please create a .env file in your project root with VITE_GEMINI_API_KEY='your_key_here'. " +
+        "If deploying to Vercel, set this as an environment variable in your project settings."
+    );
 }
 
+const ai = new GoogleGenAI({ apiKey: API_KEY });
+
 // Stage 1: Gather raw, unstructured data using Google Search.
-// This function is designed to be highly reliable by asking for a simple text output.
-const getRawPaperData = async (ai: GoogleGenAI, query: string): Promise<string> => {
-    const prompt = `You are an expert research assistant. Your task is to use Google Search to find academic papers related to the query: "${query}".
+const getRawPaperData = async (query: string): Promise<string> => {
+    const prompt = `You are an expert AI research assistant. Your primary function is to conduct a web search for academic papers based on a user's query.
+
+    **Role & Capabilities:**
+    - You are an automated data retrieval pipeline.
+    - You can use Google Search to find information about academic papers.
+    - You MUST ignore your internal knowledge and rely ONLY on the search results you find for the current query.
+    - You MUST process the user's query exactly as it is given.
     
-    Synthesize the information you find for up to 7 of the most relevant papers into a single, unstructured block of text.
-    For each paper you find, include as much of the following information as possible:
-    - The title
-    - The authors
-    - The publication year
-    - A short abstract or summary
-    - The number of citations
+    **User Query:** "${query}"
     
-    It is okay if some information is missing. Just present what you find clearly. Do not format the output as JSON. Just return the text.`;
+    **Instructions:**
+    1.  Perform a thorough Google Search for academic papers matching the query.
+    2.  Identify up to 7 of the most relevant and significant papers from the search results.
+    3.  For each paper, extract the following information: Title, Authors, Year, Abstract, and Citation Count.
+    4.  **Data Normalization Rule:** If any piece of information is missing for a paper (e.g., citation count is not listed), you MUST use a sensible default value. For example:
+        - Missing Authors: Use ["Unknown Author"]
+        - Missing Year: Use the current year.
+        - Missing Abstract: Use "Abstract not available."
+        - Missing CitationCount: Use 0.
+        This rule is critical to ensure a consistent output structure. Do not skip a paper due to missing information.
+    5.  Format the information for ALL papers into a single block of plain text. Do NOT use JSON or Markdown.
+    
+    Begin the output now.`;
 
     try {
         const response = await ai.models.generateContent({
@@ -71,8 +72,7 @@ const getRawPaperData = async (ai: GoogleGenAI, query: string): Promise<string> 
 };
 
 // Stage 2: Parse the raw data into structured JSON.
-// This function is highly reliable due to the use of responseMimeType and a schema.
-const formatPaperData = async (ai: GoogleGenAI, rawData: string): Promise<Paper[]> => {
+const formatPaperData = async (rawData: string): Promise<Paper[]> => {
     if (!rawData.trim()) {
         return []; // If stage 1 found nothing, return an empty array.
     }
@@ -132,15 +132,14 @@ const formatPaperData = async (ai: GoogleGenAI, rawData: string): Promise<Paper[
 
 // The main exported function that orchestrates the two-stage pipeline.
 export const searchPapers = async (query: string): Promise<Paper[]> => {
-    const ai = getAi();
     try {
         console.log(`Starting two-stage search for: ${query}`);
         
         // Stage 1: Get raw, unstructured data from the web.
-        const rawData = await getRawPaperData(ai, query);
+        const rawData = await getRawPaperData(query);
 
         // Stage 2: Parse the raw data into structured JSON.
-        const papers = await formatPaperData(ai, rawData);
+        const papers = await formatPaperData(rawData);
 
         return papers;
 
