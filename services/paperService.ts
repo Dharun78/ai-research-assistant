@@ -5,7 +5,7 @@ import { GoogleGenAI, Type } from "@google/genai";
 // It is called only when an API request is made.
 const getClient = () => {
     // Fix: Per guidelines, use process.env.API_KEY instead of Vite-specific import.meta.env. This resolves the TypeScript error 'Property 'env' does not exist on type 'ImportMeta''.
-    const apiKey = process.env.VIE_GEMINI_API_KEY;
+    const apiKey = process.env.VITE_GEMINI_API_KEY;
 
     if (!apiKey) {
         // This error will be thrown if the environment variable is not set.
