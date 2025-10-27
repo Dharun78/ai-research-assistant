@@ -1,35 +1,18 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { Paper, ComparisonResult, KnowledgeGraphData, SinglePaperAnalysisResult } from '../types';
 
-const getAi = (): GoogleGenAI => {
-    let apiKey: string | undefined;
-    try {
-        // This is the prescribed way to access the key.
-        // It might be replaced by a build tool, or the environment might shim `process`.
-        apiKey = process.env.API_KEY;
-    } catch (e) {
-        // This catch block will handle the "ReferenceError: process is not defined" case gracefully.
-        console.error("Could not access process.env.API_KEY", e);
-    }
-
-    if (!apiKey) {
-        // This will be triggered if process.env.API_KEY is undefined, null, or an empty string,
-        // or if the try block failed.
-        throw new Error(
-            "Configuration Error: The API_KEY is not available. \n\n" +
-            "If you have deployed this application, please ensure that the API_KEY environment variable is correctly set in your hosting provider's settings (e.g., Vercel, Netlify). \n\n" +
-            "The application cannot function without the API key."
-        );
-    }
-
-    return new GoogleGenAI({ apiKey });
-}
+// FIX: Switched from `import.meta.env` to `process.env.API_KEY` to resolve the TypeScript error and align with the coding guidelines.
+const ai = new GoogleGenAI({ apiKey: process.env.API_KEY! });
 
 export const generateSuggestions = async (query: string): Promise<string[]> => {
     try {
-        const ai = getAi();
-        const prompt = `Based on the research paper search query "${query}", generate 3 related but different search queries that a researcher might find useful. Return the result as a JSON array of strings.`;
-        
+        const prompt = `Based on the user's search for "${query}", generate a JSON array of 3 distinct, high-quality search queries that logically follow the input topic or address potential research gaps.
+
+        Rules:
+        - The output must be a single, raw JSON array of strings.
+        - Do not include any surrounding text or markdown.
+        - Example output: ["Related Query 1", "Alternative perspective query", "Future trends query"]`;
+
         const response = await ai.models.generateContent({
             model: "gemini-2.5-flash",
             contents: prompt,
@@ -37,214 +20,221 @@ export const generateSuggestions = async (query: string): Promise<string[]> => {
                 responseMimeType: "application/json",
                 responseSchema: {
                     type: Type.ARRAY,
-                    items: { type: Type.STRING },
-                },
-            },
+                    items: { type: Type.STRING }
+                }
+            }
         });
-
         const jsonStr = response.text.trim();
-        const suggestions = JSON.parse(jsonStr);
-        return suggestions;
+        return JSON.parse(jsonStr);
     } catch (error) {
         console.error("Error generating suggestions:", error);
-        return [`alternative views on ${query}`, `historical context of ${query}`, `future of ${query}`];
+        // Return an empty array on failure as this is a non-critical feature
+        return [];
     }
 };
 
-export const generateComparison = async (papers: Paper[]): Promise<ComparisonResult> => {
-    const ai = getAi();
-    const paperContext = papers.map(p => `
-        PAPER ID: ${p.id}
-        TITLE: ${p.title}
-        AUTHORS: ${p.authors.join(', ')}
-        YEAR: ${p.year}
-        ABSTRACT: ${p.abstract}
-    `).join('\n---\n');
+const getComparisonPrompt = (papers: Paper[]) => {
+    const paperDetails = papers.map(p => `
+        ---
+        ID: ${p.id}
+        Title: ${p.title}
+        Authors: ${p.authors.join(', ')}
+        Year: ${p.year}
+        Abstract: ${p.abstract}
+        ---
+    `).join('\n');
 
-    const prompt = `You are an expert academic reviewer AI. Your task is to conduct a rigorous, in-depth comparative analysis of the following research papers. Your output must be a JSON object that is both detailed and critically insightful.
+    return `You are a world-class research analyst AI. Your task is to perform a detailed comparative analysis of the following academic papers.
 
-        PAPERS:
-        ${paperContext}
+    **Input Papers:**
+    ${paperDetails}
 
-        TASK:
-        Generate a JSON object with two main keys: "summary" and "comparison".
+    **Required Output:**
+    Your entire response must be a single, raw JSON object. Do not include any surrounding text or markdown.
 
-        1.  **summary**: A concise, executive summary that synthesizes the core themes, objectives, and collective significance of the provided papers. Go beyond a simple list of topics; identify the overarching narrative or research trajectory they represent.
-
-        2.  **comparison**: A detailed object containing a critical analysis for each of the following fields. Do not simply describe; you must compare, contrast, and synthesize.
-
-            *   **methodology**:
-                - First, for each paper, individually identify and briefly describe its primary methodology, experimental setup, datasets used, and key evaluation metrics.
-                - Then, critically compare and contrast these approaches. Are they standard for the field? Are they innovative? What are the potential strengths and weaknesses of each approach relative to the others?
-
-            *   **keyFindings**:
-                - For each paper, list its most significant findings and conclusions.
-                - Compare these findings directly. Do they corroborate, complement, or challenge one another? Highlight specific points of convergence or divergence. Quantify results where possible.
-
-            *   **contributions**:
-                - Clearly articulate the primary contribution of each paper to its field. Is it a new model, a novel dataset, a theoretical insight, or a comprehensive survey?
-                - Compare the *significance* and *impact* of these contributions. Which paper offers a more foundational or disruptive contribution and why?
-
-            *   **contradictions**:
-                - Scrutinize the papers for any direct contradictions in their claims, findings, or conclusions.
-                - IMPORTANT: If no direct contradictions are found, you MUST state this explicitly and provide a nuanced explanation. For example: "No direct contradictions were found, as Paper A focuses on model efficiency while Paper B investigates theoretical underpinnings, making their findings complementary rather than conflicting." Do not leave this field empty or generic.
-
-            *   **researchGaps**:
-                - Synthesize the limitations acknowledged by the authors and the future work they propose.
-                - From your expert perspective, identify any broader research gaps or unanswered questions that emerge from reading these papers together. What is the logical next step for research in this combined area?
-    `;
-
-    const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
-        contents: prompt,
-        config: {
-            responseMimeType: "application/json",
-            responseSchema: {
-                type: Type.OBJECT,
-                properties: {
-                    summary: { 
-                        type: Type.STRING,
-                        description: "A concise executive summary synthesizing the core themes, objectives, and collective significance of the provided papers."
-                    },
-                    comparison: {
-                        type: Type.OBJECT,
-                        properties: {
-                            methodology: { 
-                                type: Type.STRING,
-                                description: "A critical comparison of the methodologies, experimental setups, datasets, and evaluation metrics used in each paper."
-                            },
-                            keyFindings: { 
-                                type: Type.STRING,
-                                description: "A direct comparison of the most significant findings and conclusions from each paper, highlighting points of convergence or divergence."
-                            },
-                            contributions: { 
-                                type: Type.STRING,
-                                description: "An analysis of the primary contribution of each paper and a comparison of their significance and impact."
-                            },
-                            contradictions: { 
-                                type: Type.STRING,
-                                description: "Identification of any direct contradictions. If none, an explicit statement and explanation for the lack of conflict."
-                            },
-                            researchGaps: { 
-                                type: Type.STRING,
-                                description: "A synthesis of limitations, proposed future work, and broader research gaps that emerge from reading the papers together."
-                            },
-                        },
-                        required: ["methodology", "keyFindings", "contributions", "contradictions", "researchGaps"]
-                    }
-                },
-                required: ["summary", "comparison"]
-            }
-        },
-    });
-
-    const jsonStr = response.text.trim();
-    return JSON.parse(jsonStr) as ComparisonResult;
+    **JSON Schema:**
+    {
+      "summary": "A concise, high-level summary of the entire set of papers, highlighting the core theme and evolution of ideas.",
+      "comparison": {
+        "methodology": "Compare the research methods, datasets, and evaluation metrics used across the papers. Note similarities and key differences.",
+        "keyFindings": "Compare and contrast the primary conclusions and results. What are the main takeaways from each paper?",
+        "contributions": "Analyze the significance and impact of each paper's contribution to its field. Which paper is most influential and why?",
+        "contradictions": "Identify any direct conflicts in findings or conclusions. If there are no conflicts, explain how the findings are complementary.",
+        "researchGaps": "Identify the collective limitations and unanswered questions. Suggest 2-3 specific future research directions that emerge from analyzing these papers together."
+      }
+    }`;
 };
 
-export const generateKnowledgeGraph = async (papers: Paper[]): Promise<KnowledgeGraphData> => {
-     const ai = getAi();
-     const paperContext = papers.map(p => `
-        PAPER ID: ${p.id}
-        TITLE: ${p.title}
-        ABSTRACT: ${p.abstract}
-    `).join('\n---\n');
+export const generateComparison = async (papers: Paper[]): Promise<ComparisonResult> => {
+    const prompt = getComparisonPrompt(papers);
+    try {
+        const response = await ai.models.generateContent({
+            model: "gemini-2.5-pro", // Use a more powerful model for deep analysis
+            contents: prompt,
+            config: {
+                responseMimeType: "application/json",
+                responseSchema: {
+                    type: Type.OBJECT,
+                    properties: {
+                        summary: { type: Type.STRING },
+                        comparison: {
+                            type: Type.OBJECT,
+                            properties: {
+                                methodology: { type: Type.STRING },
+                                keyFindings: { type: Type.STRING },
+                                contributions: { type: Type.STRING },
+                                contradictions: { type: Type.STRING },
+                                researchGaps: { type: Type.STRING },
+                            },
+                             required: ["methodology", "keyFindings", "contributions", "contradictions", "researchGaps"]
+                        }
+                    },
+                    required: ["summary", "comparison"]
+                }
+            }
+        });
+        const jsonStr = response.text.trim();
+        return JSON.parse(jsonStr) as ComparisonResult;
+    } catch (error) {
+        console.error("Error generating comparison:", error);
+        throw new Error("Failed to generate the paper comparison due to an AI processing error.");
+    }
+};
 
-    const prompt = `Analyze the provided research paper abstracts to create a knowledge graph.
+const getKnowledgeGraphPrompt = (papers: Paper[]) => {
+    const paperDetails = papers.map(p => `
+        ---
+        ID: ${p.id}
+        Title: ${p.title}
+        Abstract: ${p.abstract}
+        ---
+    `).join('\n');
+
+    return `You are an AI specializing in knowledge synthesis and graph theory. Your task is to create the data for a knowledge graph from a list of academic papers.
+
+    **Input Papers:**
+    ${paperDetails}
+
+    **Instructions:**
+    1.  Identify the core concepts and methodologies from all paper abstracts.
+    2.  Create nodes for each paper title, each core concept, and each key methodology.
+    3.  Create links to connect papers to the concepts and methodologies they discuss.
+    4.  The entire output must be a single, raw JSON object adhering to the schema below.
+
+    **JSON Schema:**
+    {
+      "nodes": [
+        { "id": "unique_node_id", "label": "Node Label", "group": "paper_title|concept|methodology" }
+      ],
+      "links": [
+        { "source": "source_node_id", "target": "target_node_id", "label": "describes|uses|builds_on" }
+      ]
+    }
     
-    PAPERS:
-    ${paperContext}
-
-    TASK:
-    Your goal is to create a visual summary of the papers' core concepts. Generate a JSON object representing this graph with "nodes" and "links".
-    - "nodes": An array of objects, each with "id" (unique string), "label" (concept name), and "group" ('paper_title', 'concept', or 'methodology'). You MUST create one 'paper_title' node for each paper. Then, identify the top 5-7 most important concepts or methods from all papers combined to create 'concept' or 'methodology' nodes.
-    - "links": An array of objects, each with "source" (node id), "target" (node id), and "label" (relationship, e.g., "uses", "addresses"). Links must connect concepts to the paper they came from, or connect shared concepts between papers.
-
-    IMPORTANT: A knowledge graph must always be generated. If the papers are on very different topics, create separate clusters of concept nodes for each paper, all linking back to their respective 'paper_title' node. Do not return an empty "nodes" or "links" array. The graph must visually represent the key ideas of the provided papers.
+    Example Node: { "id": "paper_1", "label": "Attention Is All You Need", "group": "paper_title" }
+    Example Node: { "id": "concept_transformer", "label": "Transformer Architecture", "group": "concept" }
+    Example Link: { "source": "paper_1", "target": "concept_transformer", "label": "describes" }
     `;
+};
 
-    const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
-        contents: prompt,
-        config: {
-            responseMimeType: 'application/json',
-            responseSchema: {
-                type: Type.OBJECT,
-                properties: {
-                    nodes: {
-                        type: Type.ARRAY,
-                        items: {
-                            type: Type.OBJECT,
-                            properties: {
-                                id: { type: Type.STRING },
-                                label: { type: Type.STRING },
-                                group: { type: Type.STRING },
-                            },
-                            required: ["id", "label", "group"]
-                        },
-                    },
-                    links: {
-                        type: Type.ARRAY,
-                        items: {
-                            type: Type.OBJECT,
-                            properties: {
-                                source: { type: Type.STRING },
-                                target: { type: Type.STRING },
-                                label: { type: Type.STRING },
-                            },
-                            required: ["source", "target", "label"]
-                        },
-                    },
-                },
-                required: ["nodes", "links"]
-            },
-        },
-    });
 
-    const jsonStr = response.text.trim();
-    return JSON.parse(jsonStr) as KnowledgeGraphData;
+export const generateKnowledgeGraph = async (papers: Paper[]): Promise<KnowledgeGraphData> => {
+     const prompt = getKnowledgeGraphPrompt(papers);
+    try {
+        const response = await ai.models.generateContent({
+            model: "gemini-2.5-flash",
+            contents: prompt,
+            config: {
+                responseMimeType: "application/json",
+                responseSchema: {
+                    type: Type.OBJECT,
+                    properties: {
+                        nodes: {
+                            type: Type.ARRAY,
+                            items: {
+                                type: Type.OBJECT,
+                                properties: {
+                                    id: { type: Type.STRING },
+                                    label: { type: Type.STRING },
+                                    group: { type: Type.STRING },
+                                },
+                                required: ["id", "label", "group"]
+                            }
+                        },
+                        links: {
+                            type: Type.ARRAY,
+                            items: {
+                                type: Type.OBJECT,
+                                properties: {
+                                    source: { type: Type.STRING },
+                                    target: { type: Type.STRING },
+                                    label: { type: Type.STRING },
+                                },
+                                required: ["source", "target", "label"]
+                            }
+                        }
+                    },
+                    required: ["nodes", "links"]
+                }
+            }
+        });
+        const jsonStr = response.text.trim();
+        return JSON.parse(jsonStr) as KnowledgeGraphData;
+    } catch (error) {
+        console.error("Error generating knowledge graph:", error);
+        throw new Error("Failed to generate the knowledge graph due to an AI processing error.");
+    }
+};
+
+const getSinglePaperAnalysisPrompt = (paper: Paper) => {
+    return `You are a world-class research analyst AI. Your task is to perform a detailed analysis of the following academic paper based on its title, authors, year, and abstract.
+
+    **Input Paper:**
+    ---
+    Title: ${paper.title}
+    Authors: ${paper.authors.join(', ')}
+    Year: ${paper.year}
+    Abstract: ${paper.abstract}
+    ---
+
+    **Required Output:**
+    Your entire response must be a single, raw JSON object. Do not include any surrounding text or markdown.
+
+    **JSON Schema:**
+    {
+      "summary": "A concise summary of the paper's core topic, methodology, and findings.",
+      "keyConcepts": "A bulleted list (using '\\n- ') of the most important concepts, terms, and theories introduced or utilized in the paper.",
+      "methodology": "A detailed description of the research methodology, including the dataset, model architecture (if any), and evaluation metrics.",
+      "contributions": "A bulleted list (using '\\n- ') analyzing the paper's main contributions to its field. What is novel or significant?",
+      "futureWork": "A summary of the potential future work or research directions suggested by the authors or implied by the paper's limitations."
+    }`;
 };
 
 export const generateSinglePaperAnalysis = async (paper: Paper): Promise<SinglePaperAnalysisResult> => {
-    const ai = getAi();
-    const prompt = `You are a research analyst AI. Provide a detailed analysis of the following research paper.
-
-    PAPER:
-    TITLE: ${paper.title}
-    AUTHORS: ${paper.authors.join(', ')}
-    YEAR: ${paper.year}
-    ABSTRACT: ${paper.abstract}
-
-    TASK:
-    Generate a comprehensive analysis structured as a JSON object with the following keys:
-    - "summary": A concise summary of the paper's core topic and findings.
-    - "keyConcepts": A list or paragraph of the most important concepts, terms, and theories discussed.
-    - "methodology": A description of the research methodology used in the paper.
-    - "contributions": An analysis of the paper's main contributions to its field.
-    - "futureWork": A summary of the potential future work or research directions suggested by the paper.
-
-    Your analysis should be clear, insightful, and well-structured.
-    `;
-
-    const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
-        contents: prompt,
-        config: {
-            responseMimeType: "application/json",
-            responseSchema: {
-                type: Type.OBJECT,
-                properties: {
-                    summary: { type: Type.STRING },
-                    keyConcepts: { type: Type.STRING },
-                    methodology: { type: Type.STRING },
-                    contributions: { type: Type.STRING },
-                    futureWork: { type: Type.STRING },
-                },
-                required: ["summary", "keyConcepts", "methodology", "contributions", "futureWork"]
+    const prompt = getSinglePaperAnalysisPrompt(paper);
+    try {
+        const response = await ai.models.generateContent({
+            model: "gemini-2.5-pro", // Use Pro for higher quality analysis
+            contents: prompt,
+            config: {
+                responseMimeType: "application/json",
+                responseSchema: {
+                    type: Type.OBJECT,
+                    properties: {
+                        summary: { type: Type.STRING },
+                        keyConcepts: { type: Type.STRING },
+                        methodology: { type: Type.STRING },
+                        contributions: { type: Type.STRING },
+                        futureWork: { type: Type.STRING },
+                    },
+                    required: ["summary", "keyConcepts", "methodology", "contributions", "futureWork"]
+                }
             }
-        },
-    });
-
-    const jsonStr = response.text.trim();
-    return JSON.parse(jsonStr) as SinglePaperAnalysisResult;
-}
+        });
+        const jsonStr = response.text.trim();
+        return JSON.parse(jsonStr) as SinglePaperAnalysisResult;
+    } catch (error) {
+        console.error("Error generating single paper analysis:", error);
+        throw new Error("Failed to generate the paper analysis due to an AI processing error.");
+    }
+};
