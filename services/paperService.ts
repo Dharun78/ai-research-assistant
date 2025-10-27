@@ -1,19 +1,8 @@
 import { Paper } from '../types';
 import { GoogleGenAI, Type } from "@google/genai";
 
-// This is the standard way to access environment variables in a Vite project.
-// Vercel will automatically expose variables with the VITE_ prefix to the client during the build process.
-const API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
-
-if (!API_KEY) {
-    throw new Error(
-        "Configuration Error: VITE_GEMINI_API_KEY is not set. " +
-        "Please create a .env file in your project root with VITE_GEMINI_API_KEY='your_key_here'. " +
-        "If deploying to Vercel, set this as an environment variable in your project settings."
-    );
-}
-
-const ai = new GoogleGenAI({ apiKey: API_KEY });
+// FIX: Switched from `import.meta.env` to `process.env.API_KEY` to resolve the TypeScript error and align with the coding guidelines.
+const ai = new GoogleGenAI({ apiKey: process.env.API_KEY! });
 
 // Stage 1: Gather raw, unstructured data using Google Search.
 const getRawPaperData = async (query: string): Promise<string> => {
