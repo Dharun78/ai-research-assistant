@@ -1,11 +1,26 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { Paper, ComparisonResult, KnowledgeGraphData, SinglePaperAnalysisResult } from '../types';
 
-// FIX: Switched from `import.meta.env` to `process.env.API_KEY` to resolve the TypeScript error and align with the coding guidelines.
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY! });
+// This function safely initializes and returns the AI client.
+// It is called only when an API request is made.
+const getClient = () => {
+    // Fix: Per guidelines, use process.env.API_KEY instead of Vite-specific import.meta.env. This resolves the TypeScript error 'Property 'env' does not exist on type 'ImportMeta''.
+    const apiKey = process.env.VITE_GEMINI_API_KEY;
+
+    if (!apiKey) {
+        // This error will be thrown if the environment variable is not set.
+        throw new Error(
+            "Configuration Error: The API_KEY environment variable is not set. Please ensure it is configured in your environment. The application cannot function without it."
+        );
+    }
+
+    return new GoogleGenAI({ apiKey });
+}
+
 
 export const generateSuggestions = async (query: string): Promise<string[]> => {
     try {
+        const ai = getClient();
         const prompt = `Based on the user's search for "${query}", generate a JSON array of 3 distinct, high-quality search queries that logically follow the input topic or address potential research gaps.
 
         Rules:
@@ -68,6 +83,7 @@ const getComparisonPrompt = (papers: Paper[]) => {
 export const generateComparison = async (papers: Paper[]): Promise<ComparisonResult> => {
     const prompt = getComparisonPrompt(papers);
     try {
+        const ai = getClient();
         const response = await ai.models.generateContent({
             model: "gemini-2.5-pro", // Use a more powerful model for deep analysis
             contents: prompt,
@@ -141,6 +157,7 @@ const getKnowledgeGraphPrompt = (papers: Paper[]) => {
 export const generateKnowledgeGraph = async (papers: Paper[]): Promise<KnowledgeGraphData> => {
      const prompt = getKnowledgeGraphPrompt(papers);
     try {
+        const ai = getClient();
         const response = await ai.models.generateContent({
             model: "gemini-2.5-flash",
             contents: prompt,
@@ -213,6 +230,7 @@ const getSinglePaperAnalysisPrompt = (paper: Paper) => {
 export const generateSinglePaperAnalysis = async (paper: Paper): Promise<SinglePaperAnalysisResult> => {
     const prompt = getSinglePaperAnalysisPrompt(paper);
     try {
+        const ai = getClient();
         const response = await ai.models.generateContent({
             model: "gemini-2.5-pro", // Use Pro for higher quality analysis
             contents: prompt,
