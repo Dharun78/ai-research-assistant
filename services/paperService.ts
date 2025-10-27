@@ -1,11 +1,26 @@
 import { Paper } from '../types';
 import { GoogleGenAI, Type } from "@google/genai";
 
-// FIX: Switched from `import.meta.env` to `process.env.API_KEY` to resolve the TypeScript error and align with the coding guidelines.
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY! });
+// This function safely initializes and returns the AI client.
+// It is called only when an API request is made.
+const getClient = () => {
+    // Fix: Per guidelines, use process.env.API_KEY instead of Vite-specific import.meta.env. This resolves the TypeScript error 'Property 'env' does not exist on type 'ImportMeta''.
+    const apiKey = process.env.VIE_GEMINI_API_KEY;
+
+    if (!apiKey) {
+        // This error will be thrown if the environment variable is not set.
+        throw new Error(
+            "Configuration Error: The API_KEY environment variable is not set. Please ensure it is configured in your environment. The application cannot function without it."
+        );
+    }
+
+    return new GoogleGenAI({ apiKey });
+}
+
 
 // Stage 1: Gather raw, unstructured data using Google Search.
 const getRawPaperData = async (query: string): Promise<string> => {
+    const ai = getClient();
     const prompt = `You are an expert AI research assistant. Your primary function is to conduct a web search for academic papers based on a user's query.
 
     **Role & Capabilities:**
@@ -65,7 +80,8 @@ const formatPaperData = async (rawData: string): Promise<Paper[]> => {
     if (!rawData.trim()) {
         return []; // If stage 1 found nothing, return an empty array.
     }
-
+    
+    const ai = getClient();
     const prompt = `You are a data extraction and formatting expert. You will be given a block of text containing unstructured information about academic papers. Your sole task is to parse this text and convert it into a structured JSON array of paper objects.
 
     **Input Text:**
