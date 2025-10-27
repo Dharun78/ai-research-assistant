@@ -1,0 +1,5 @@
+{
+  "name": "Nexus Scholar AI",
+  "description": "A high-fidelity RAG-powered research paper comparison system with internet-wide paper search, semantic analysis, knowledge graphs, and a neon-themed dark UI for advanced scholarly discovery.",
+  "requestFramePermissions": []
+}

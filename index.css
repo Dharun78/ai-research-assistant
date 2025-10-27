@@ -1,0 +1,41 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Orbitron:wght@400;700&display=swap');
+
+/* 
+  These are the base styles for the application.
+  They are defined here instead of on the body tag for better organization.
+  The hex codes correspond to the custom 'dark-bg' and 'light-text' 
+  colors defined in the tailwind.config script in index.html.
+*/
+body {
+  background-color: #0a0a0a; /* corresponds to dark-bg */
+  color: #E0E0E0; /* corresponds to light-text */
+  font-family: 'Inter', sans-serif;
+}
+
+/* 
+  Define a reusable class for the Orbitron font.
+  This is now configured in tailwind.config.js as well, 
+  making `font-orbitron` a valid Tailwind class.
+*/
+.font-orbitron {
+    font-family: 'Orbitron', sans-serif;
+}
+
+/* 
+  Custom animation for the fade-in effect used in FileUpload.tsx.
+  The 'animate-fade-in' class was being used without being defined.
+*/
+@keyframes fadeIn {
+    from { 
+        opacity: 0; 
+        transform: translateY(-10px); 
+    }
+    to { 
+        opacity: 1; 
+        transform: translateY(0); 
+    }
+}
+
+.animate-fade-in {
+    animation: fadeIn 0.3s ease-out forwards;
+}
