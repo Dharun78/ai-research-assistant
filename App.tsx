@@ -75,7 +75,6 @@ const App: React.FC = () => {
     const [currentPaperForAnalysis, setCurrentPaperForAnalysis] = useState<Paper | null>(null);
     const [papersForDashboard, setPapersForDashboard] = useState<Paper[]>([]);
 
-
     const handleSearch = useCallback(async (query: string) => {
         if (!query.trim()) return;
         setIsSearching(true);
@@ -123,6 +122,7 @@ const App: React.FC = () => {
             alert('Please select at least two papers to compare.');
             return;
         }
+        
         setIsProcessing(true);
         setError(null);
         setComparisonResult(null);
