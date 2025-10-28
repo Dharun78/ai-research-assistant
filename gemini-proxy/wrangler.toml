@@ -1,7 +1,0 @@
-name = "gemini-proxy"
-main = "index.js"
-compatibility_date = "2025-10-28"
-
-[vars]
-# Option 1: add temporarily here (for quick testing)
-# GEMINI_API_KEY = "YOUR_GEMINI_API_KEY"

@@ -1,0 +1,3 @@
+name = "ai-research-assistant"
+main = "gemini-proxy/index.js"
+compatibility_date = "2025-10-28"
