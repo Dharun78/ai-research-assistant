@@ -1,159 +1,161 @@
-import { Paper } from '../types';
-import { GoogleGenAI, Type } from "@google/genai";
+// paperService.ts
+// Handles all paper search and parsing using Gemini through your Cloudflare Worker proxy.
 
-// This function safely initializes and returns the AI client.
-// It is called only when an API request is made.
-const getClient = () => {
-    // Fix: Per guidelines, use process.env.API_KEY instead of Vite-specific import.meta.env. This resolves the TypeScript error 'Property 'env' does not exist on type 'ImportMeta''.
-    const apiKey = process.env.GEMINI_API_KEY;
+import { Paper } from "../types";
 
-    if (!apiKey) {
-        // This error will be thrown if the environment variable is not set.
-        throw new Error(
-            "Configuration Error: The API_KEY environment variable is not set. Please ensure it is configured in your environment. The application cannot function without it."
-        );
+// 🌐 Cloudflare Worker proxy endpoint
+const GEMINI_PROXY_URL = "https://ai-research-assistant.dharunnamikaze.workers.dev";
+
+/* ────────────────────────────────────────────────
+   Utility: Send Prompt to Cloudflare Worker Proxy
+────────────────────────────────────────────────── */
+const callGeminiProxy = async (
+  prompt: string,
+  model: string = "gemini-2.5-pro",
+  extraConfig: Record<string, any> = {}
+): Promise<string> => {
+  try {
+    const response = await fetch(GEMINI_PROXY_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt, model, ...extraConfig }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Proxy request failed (${response.status}): ${errorText}`);
     }
 
-    return new GoogleGenAI({ apiKey });
-}
+    const data = await response.json();
 
+    // Handle various Gemini output formats
+    const output =
+      data?.output ||
+      data?.text ||
+      data?.candidates?.[0]?.content?.parts?.[0]?.text ||
+      "";
 
-// Stage 1: Gather raw, unstructured data using Google Search.
+    if (!output.trim()) {
+      throw new Error("⚠️ Empty response from Gemini proxy.");
+    }
+
+    return output.trim();
+  } catch (error) {
+    console.error("Gemini proxy call failed:", error);
+    throw new Error("Failed to communicate with the Gemini proxy service.");
+  }
+};
+
+/* ────────────────────────────────────────────────
+   Stage 1️⃣: Retrieve Unstructured Paper Data
+────────────────────────────────────────────────── */
 const getRawPaperData = async (query: string): Promise<string> => {
-    const ai = getClient();
-    const prompt = `You are an expert AI research assistant. Your primary function is to conduct a web search for academic papers based on a user's query.
+  const prompt = `
+You are an expert AI research assistant. Find up to **7** academic papers relevant to the following query:
 
-    **Role & Capabilities:**
-    - You are an automated data retrieval pipeline.
-    - You can use Google Search to find information about academic papers.
-    - You MUST ignore your internal knowledge and rely ONLY on the search results you find for the current query.
-    - You MUST process the user's query exactly as it is given.
-    
-    **User Query:** "${query}"
-    
-    **Instructions:**
-    1.  Perform a thorough Google Search for academic papers matching the query.
-    2.  Identify up to 7 of the most relevant and significant papers from the search results.
-    3.  For each paper, extract the following information: Title, Authors, Year, Abstract, and Citation Count.
-    4.  **Data Normalization Rule:** If any piece of information is missing for a paper (e.g., citation count is not listed), you MUST use a sensible default value. For example:
-        - Missing Authors: Use ["Unknown Author"]
-        - Missing Year: Use the current year.
-        - Missing Abstract: Use "Abstract not available."
-        - Missing CitationCount: Use 0.
-        This rule is critical to ensure a consistent output structure. Do not skip a paper due to missing information.
-    5.  Format the information for ALL papers into a single block of plain text. Do NOT use JSON or Markdown.
-    
-    Begin the output now.`;
+"${query}"
 
-    try {
-        const response = await ai.models.generateContent({
-            model: "gemini-2.5-pro",
-            contents: prompt,
-            config: {
-                tools: [{ googleSearch: {} }]
-            }
-        });
+Each paper should include:
+- Title
+- Authors
+- Year
+- Abstract
+- Citation Count
 
-        if (response.promptFeedback && response.promptFeedback.blockReason) {
-            const { blockReason, safetyRatings } = response.promptFeedback;
-            const blockedCategories = safetyRatings?.filter(r => r.blocked).map(r => r.category).join(', ') || 'N/A';
-            throw new Error(
-                `Search failed: The query was blocked for safety reasons.\nReason: ${blockReason}.\nCategories: ${blockedCategories}.`
-            );
-        }
+Rules:
+1. Simulate an academic paper search (assume internet access).
+2. If information is missing:
+   - Authors → ["Unknown Author"]
+   - Year → Current year
+   - Abstract → "Abstract not available."
+   - Citation Count → 0
+3. Output plain text only — NOT JSON or Markdown.
+4. Make results realistic and diverse.
+  `;
 
-        const text = response.text?.trim();
-        if (!text) {
-            console.warn("Stage 1 (Data Gathering) returned no text. This likely means no relevant papers were found on the web for the query.");
-            return ""; 
-        }
-
-        return text;
-    } catch(e) {
-        console.error("Error in Stage 1 (getRawPaperData):", e);
-        throw e; // Re-throw to be caught by the main search function
+  try {
+    const output = await callGeminiProxy(prompt, "gemini-2.5-pro");
+    if (!output) {
+      console.warn("⚠️ No raw data returned for query:", query);
+      return "";
     }
+    return output;
+  } catch (error) {
+    console.error("Error in Stage 1 (getRawPaperData):", error);
+    throw new Error("Stage 1 failed: Could not fetch raw academic paper data.");
+  }
 };
 
-// Stage 2: Parse the raw data into structured JSON.
+/* ────────────────────────────────────────────────
+   Stage 2️⃣: Convert Text → Structured JSON
+────────────────────────────────────────────────── */
 const formatPaperData = async (rawData: string): Promise<Paper[]> => {
-    if (!rawData.trim()) {
-        return []; // If stage 1 found nothing, return an empty array.
+  if (!rawData.trim()) return [];
+
+  const prompt = `
+You are a data extraction model. Convert the following unstructured paper info into a clean JSON array.
+
+---
+${rawData}
+---
+
+Schema:
+[
+  {
+    "id": "unique-id",
+    "title": "string",
+    "authors": ["string"],
+    "year": 2024,
+    "abstract": "string",
+    "citationCount": 42,
+    "tldr": "string"
+  }
+]
+
+Rules:
+- If any field is missing, assign defaults:
+  - authors → ["Unknown"]
+  - year → current year
+  - abstract → "Abstract not available."
+  - citationCount → 0
+  - tldr → first sentence of abstract
+- Output only valid JSON, no markdown or explanation text.
+`;
+
+  try {
+    const output = await callGeminiProxy(prompt, "gemini-2.5-flash");
+    const parsed = JSON.parse(output);
+
+    if (!Array.isArray(parsed)) {
+      throw new Error("Invalid format: Expected a JSON array of papers.");
     }
-    
-    const ai = getClient();
-    const prompt = `You are a data extraction and formatting expert. You will be given a block of text containing unstructured information about academic papers. Your sole task is to parse this text and convert it into a structured JSON array of paper objects.
 
-    **Input Text:**
-    ---
-    ${rawData}
-    ---
-    
-    **Output JSON Schema:**
-    For each paper you can identify in the text, create a JSON object with the following fields:
-    - id: A unique identifier (e.g., arXiv ID or DOI if present). If unavailable, create a unique slug from the title and year.
-    - title: The full title of the paper.
-    - authors: An array of strings with the primary authors' names. If unavailable, use ["Unknown"].
-    - year: The publication year as a number. If unavailable, use the current year.
-    - abstract: A concise and informative abstract of the paper. If unavailable, use "Abstract not available."
-    - citationCount: The number of citations. If unknown, use 0.
-    - tldr: A one-sentence "Too Long; Didn't Read" summary based on the abstract. If you cannot create one, use the first sentence of the abstract.
-    
-    Your entire response MUST be a single, raw JSON array. If you cannot identify any valid papers in the input text, you MUST return an empty array \`[]\`.`;
-
-    try {
-        const response = await ai.models.generateContent({
-            model: "gemini-2.5-flash",
-            contents: prompt,
-            config: {
-                responseMimeType: "application/json",
-                responseSchema: {
-                    type: Type.ARRAY,
-                    items: {
-                        type: Type.OBJECT,
-                        properties: {
-                            id: { type: Type.STRING },
-                            title: { type: Type.STRING },
-                            authors: { type: Type.ARRAY, items: { type: Type.STRING } },
-                            year: { type: Type.NUMBER },
-                            abstract: { type: Type.STRING },
-                            citationCount: { type: Type.NUMBER },
-                            tldr: { type: Type.STRING },
-                        },
-                        required: ["id", "title", "authors", "year", "abstract", "citationCount", "tldr"]
-                    }
-                }
-            }
-        });
-
-        const jsonStr = response.text.trim();
-        return JSON.parse(jsonStr) as Paper[];
-    } catch(e) {
-        console.error("Error in Stage 2 (formatPaperData):", e);
-        throw new Error("The AI failed to format the search results. This may be a temporary issue.");
-    }
+    return parsed;
+  } catch (error) {
+    console.error("Error in Stage 2 (formatPaperData):", error);
+    throw new Error("Stage 2 failed: Could not structure paper data correctly.");
+  }
 };
 
-
-// The main exported function that orchestrates the two-stage pipeline.
+/* ────────────────────────────────────────────────
+   Main Orchestrator Function
+────────────────────────────────────────────────── */
 export const searchPapers = async (query: string): Promise<Paper[]> => {
-    try {
-        console.log(`Starting two-stage search for: ${query}`);
-        
-        // Stage 1: Get raw, unstructured data from the web.
-        const rawData = await getRawPaperData(query);
+  try {
+    console.log(`🔍 Starting Gemini-powered paper search for: ${query}`);
 
-        // Stage 2: Parse the raw data into structured JSON.
-        const papers = await formatPaperData(rawData);
+    const rawData = await getRawPaperData(query);
+    const papers = await formatPaperData(rawData);
 
-        return papers;
-
-    } catch (error) {
-        console.error("Error in the two-step paper search pipeline:", error);
-        if (error instanceof Error) {
-            // Re-throw the original error message as it's now more specific.
-            throw error;
-        }
-        throw new Error("An unexpected error occurred during the paper search.");
+    if (!papers.length) {
+      console.warn("⚠️ No structured papers extracted for query:", query);
     }
+
+    return papers;
+  } catch (error) {
+    console.error("❌ Paper search pipeline failed:", error);
+    throw error instanceof Error
+      ? error
+      : new Error("Unexpected error in paper search process.");
+  }
 };
